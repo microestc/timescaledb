@@ -556,8 +556,14 @@ timescaledb.compress_segmentby = 'bucket');
 ALTER MATERIALIZED VIEW i2980_cagg2 SET ( timescaledb.compress, 
 timescaledb.compress_orderby = 'bucket');
 
---enable compression and trigger compression policy errors
+--enable compression and test re-enabling compression 
 ALTER MATERIALIZED VIEW i2980_cagg2 SET ( timescaledb.compress);
+insert into i2980 select now();
+call refresh_continuous_aggregate('i2980_cagg2', NULL, NULL);
+SELECT compress_chunk(ch) FROM show_chunks('i2980_cagg2') ch;
+ALTER MATERIALIZED VIEW i2980_cagg2 SET ( timescaledb.compress = 'false');
+ALTER MATERIALIZED VIEW i2980_cagg2 SET ( timescaledb.compress = 'true');
+ALTER MATERIALIZED VIEW i2980_cagg2 SET ( timescaledb.compress, timescaledb.compress_segmentby = 'bucket');
 
 --Errors with compression policy on caggs--
 select add_continuous_aggregate_policy('i2980_cagg2', interval '10 day', interval '2 day' ,'4h') AS job_id ;
@@ -569,3 +575,10 @@ SELECT add_compression_policy('i2980_cagg2', '3 day'::interval);
 SELECT add_compression_policy('i2980_cagg2', '1 day'::interval);
 SELECT add_compression_policy('i2980_cagg2', '3'::integer);
 SELECT add_compression_policy('i2980_cagg2', 13::integer);
+
+SELECT materialization_hypertable_schema || '.' || materialization_hypertable_name AS "MAT_TABLE_NAME"
+FROM timescaledb_information.continuous_aggregates
+WHERE view_name = 'i2980_cagg2'
+\gset
+SELECT add_compression_policy( :'MAT_TABLE_NAME', 13::integer);
+
