@@ -184,7 +184,7 @@ policy_compression_add(PG_FUNCTION_ARGS)
 	NameData application_name;
 	NameData proc_name, proc_schema, owner;
 	int32 job_id;
-	Oid user_oid = PG_GETARG_OID(0);
+	Oid user_rel_oid = PG_GETARG_OID(0);
 	Datum compress_after_datum = PG_GETARG_DATUM(1);
 	Oid compress_after_type = PG_ARGISNULL(1) ? InvalidOid : get_fn_expr_argtype(fcinfo->flinfo, 1);
 	bool if_not_exists = PG_GETARG_BOOL(2);
@@ -198,9 +198,9 @@ policy_compression_add(PG_FUNCTION_ARGS)
 	TS_PREVENT_FUNC_IF_READ_ONLY();
 
 	hcache = ts_hypertable_cache_pin();
-	hypertable = validate_compress_chunks_hypertable(hcache, user_oid, &is_cagg);
+	hypertable = validate_compress_chunks_hypertable(hcache, user_rel_oid, &is_cagg);
 
-	owner_id = ts_hypertable_permissions_check(user_oid, GetUserId());
+	owner_id = ts_hypertable_permissions_check(user_rel_oid, GetUserId());
 	ts_bgw_job_validate_job_owner(owner_id);
 
 	/* Make sure that an existing policy doesn't exist on this hypertable */
@@ -220,7 +220,7 @@ policy_compression_add(PG_FUNCTION_ARGS)
 					(errcode(ERRCODE_DUPLICATE_OBJECT),
 					 errmsg("compression policy already exists for hypertable or continuous "
 							"aggregate \"%s\"",
-							get_rel_name(user_oid)),
+							get_rel_name(user_rel_oid)),
 					 errhint("Set option \"if_not_exists\" to true to avoid error.")));
 		}
 		Assert(list_length(jobs) == 1);
@@ -235,7 +235,7 @@ policy_compression_add(PG_FUNCTION_ARGS)
 			ts_cache_release(hcache);
 			ereport(NOTICE,
 					(errmsg("compression policy already exists for hypertable \"%s\", skipping",
-							get_rel_name(user_oid))));
+							get_rel_name(user_rel_oid))));
 			PG_RETURN_INT32(-1);
 		}
 		else
@@ -243,7 +243,7 @@ policy_compression_add(PG_FUNCTION_ARGS)
 			ts_cache_release(hcache);
 			ereport(WARNING,
 					(errmsg("compression policy already exists for hypertable \"%s\"",
-							get_rel_name(user_oid)),
+							get_rel_name(user_rel_oid)),
 					 errdetail("A policy already exists with different arguments."),
 					 errhint("Remove the existing policy before adding a new one.")));
 			PG_RETURN_INT32(-1);
@@ -308,7 +308,7 @@ policy_compression_add(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("compress_after value for compression policy should be greater than the "
 						"start of the refresh window of continuous aggregate policy for %s",
-						get_rel_name(user_oid))));
+						get_rel_name(user_rel_oid))));
 	}
 
 	JsonbValue *result = pushJsonbValue(&parse_state, WJB_END_OBJECT, NULL);
@@ -335,17 +335,17 @@ policy_compression_add(PG_FUNCTION_ARGS)
 Datum
 policy_compression_remove(PG_FUNCTION_ARGS)
 {
-	Oid user_oid = PG_GETARG_OID(0);
+	Oid user_rel_oid = PG_GETARG_OID(0);
 	bool if_exists = PG_GETARG_BOOL(1);
 	Hypertable *ht;
 	Cache *hcache;
 
 	TS_PREVENT_FUNC_IF_READ_ONLY();
 
-	ht = ts_hypertable_cache_get_cache_and_entry(user_oid, CACHE_FLAG_MISSING_OK, &hcache);
+	ht = ts_hypertable_cache_get_cache_and_entry(user_rel_oid, CACHE_FLAG_MISSING_OK, &hcache);
 	if (!ht)
 	{
-		const char *view_name = get_rel_name(user_oid);
+		const char *view_name = get_rel_name(user_rel_oid);
 
 		if (!view_name)
 			ereport(ERROR,
@@ -353,7 +353,7 @@ policy_compression_remove(PG_FUNCTION_ARGS)
 					 errmsg("relation is not a hypertable or continuous aggregate")));
 		else
 		{
-			ContinuousAgg *ca = ts_continuous_agg_find_by_relid(user_oid);
+			ContinuousAgg *ca = ts_continuous_agg_find_by_relid(user_rel_oid);
 
 			if (!ca)
 				ereport(ERROR,
@@ -376,17 +376,17 @@ policy_compression_remove(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
 					 errmsg("compression policy not found for hypertable \"%s\"",
-							get_rel_name(user_oid))));
+							get_rel_name(user_rel_oid))));
 		else
 		{
 			ereport(NOTICE,
 					(errmsg("compression policy not found for hypertable \"%s\", skipping",
-							get_rel_name(user_oid))));
+							get_rel_name(user_rel_oid))));
 			PG_RETURN_BOOL(false);
 		}
 	}
 
-	ts_hypertable_permissions_check(user_oid, GetUserId());
+	ts_hypertable_permissions_check(user_rel_oid, GetUserId());
 
 	Assert(list_length(jobs) == 1);
 	BgwJob *job = linitial(jobs);

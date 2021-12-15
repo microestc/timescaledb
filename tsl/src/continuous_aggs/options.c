@@ -70,6 +70,10 @@ update_materialized_only(ContinuousAgg *agg, bool materialized_only)
 /*
  * Retrieve the cagg view query and find the groupby clause and
  * time_bucket clause. Map them to the column names(of mat.hypertable)
+ * Note that cagg_view_query has 2 forms : with union and without UNION
+ * We have to extract the part of the query that has finalize_agg on
+ * the materialized  hypertable to find the group by clauses.
+ * (see continuous_aggs/create.c for more info on the query structure)
  * Returns: list of column names used in group by clause of the cagg query.
  */
 static List *
@@ -90,7 +94,7 @@ cagg_find_groupingcols(ContinuousAgg *agg, Hypertable *mat_ht)
 	Query *cagg_view_query = copyObject(linitial(rule->actions));
 	table_close(cagg_view_rel, NoLock); // lock with be released at end of txn
 	Oid mat_relid = mat_ht->main_table_relid;
-	Query *orig_query;
+	Query *finalize_query;
 	/* the view rule has dummy old and new range table entries as the 1st and 2nd entries
 	 */
 	Assert(list_length(cagg_view_query->rtable) >= 2);
@@ -98,22 +102,22 @@ cagg_find_groupingcols(ContinuousAgg *agg, Hypertable *mat_ht)
 	{
 		/* This corresponds to the union view.
 		 * the 3rd RTE entry has the SELECT 1 query from the union view. */
-		RangeTblEntry *orig_query_rte = lthird(cagg_view_query->rtable);
-		if (orig_query_rte->rtekind != RTE_SUBQUERY)
+		RangeTblEntry *finalize_query_rte = lthird(cagg_view_query->rtable);
+		if (finalize_query_rte->rtekind != RTE_SUBQUERY)
 			ereport(ERROR,
 					(errcode(ERRCODE_TS_UNEXPECTED),
-					 errmsg("unexpected rte type for view %d", orig_query_rte->rtekind)));
+					 errmsg("unexpected rte type for view %d", finalize_query_rte->rtekind)));
 
-		orig_query = orig_query_rte->subquery;
+		finalize_query = finalize_query_rte->subquery;
 	}
 	else
 	{
-		orig_query = cagg_view_query;
+		finalize_query = cagg_view_query;
 	}
-	foreach (lc, orig_query->groupClause)
+	foreach (lc, finalize_query->groupClause)
 	{
 		SortGroupClause *cagg_gc = (SortGroupClause *) lfirst(lc);
-		TargetEntry *cagg_tle = get_sortgroupclause_tle(cagg_gc, orig_query->targetList);
+		TargetEntry *cagg_tle = get_sortgroupclause_tle(cagg_gc, finalize_query->targetList);
 		/* groupby clauses are columns from the mat hypertable */
 		Assert(IsA(cagg_tle->expr, Var));
 		Var *mat_var = castNode(Var, cagg_tle->expr);
@@ -152,9 +156,9 @@ cagg_get_compression_params(ContinuousAgg *agg, Hypertable *mat_ht)
 			if (namestrcmp((Name) & (mat_ht_dim->fd.column_name), grpcol) == 0)
 				continue;
 			int collen = 1;
-			if (segidx > 0 && (seglen - segidx) > collen)
+			if (segidx > 0 && (seglen - segidx) > 1)
 			{
-				strlcpy(segmentby + segidx, ",", collen + 1);
+				strlcpy(segmentby + segidx, ",", 2);
 				segidx = segidx + 1;
 			}
 			collen = strlen(grpcol);
